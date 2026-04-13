@@ -419,50 +419,47 @@ def _fmt_signal(signal: str) -> str:
     return f"{_DIM}{signal}{_RESET}"
 
 def _print_cycle_header(cycle: int):
-    now = datetime.now().strftime("%Y-%m-%d  %H:%M:%S")
-    line = f"  Cycle #{cycle}  ·  {now}  ·  {POLL_INTERVAL}s interval"
-    print(f"\n{_CYAN}{'═'*62}")
-    print(line)
-    print(f"{'═'*62}{_RESET}")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"\n{_CYAN}Cycle #{cycle}  ·  {now}  ·  {POLL_INTERVAL}s interval{_RESET}")
 
 def _print_status(st: dict):
-    sym     = st["symbol"]
-    signal  = st.get("signal", "ERROR")
-    rsi     = st.get("rsi") or 0
-    bull    = st.get("bull_score", 0)
-    bear    = st.get("bear_score", 0)
+    sym    = st["symbol"][:3]          # BTC / ETH / SOL
+    signal = st.get("signal", "ERROR")
+    rsi    = st.get("rsi") or 0
+    bull   = st.get("bull_score", 0)
+    bear   = st.get("bear_score", 0)
     verdict = st.get("verdict")
-    funding = st.get("funding")
-    ls      = st.get("ls", (None, None))
-    bull_r  = st.get("bull_reasons", [])
-    bear_r  = st.get("bear_reasons", [])
-    error   = st.get("error")
-
-    fund_s = f"{funding:+.3f}%" if funding is not None else "N/A"
-    ls_s   = f"{ls[0]:.0f}/{ls[1]:.0f}" if ls[0] is not None else "N/A"
-
-    # Progress hint toward next tier
-    hint = ""
-    if signal == "BUY":
-        hint = f"  {_DIM}({5 - bull} more → STRONG BUY){_RESET}"
-    elif signal == "SELL":
-        hint = f"  {_DIM}({5 - bear} more → STRONG SELL){_RESET}"
-    elif verdict == "TAKE_TRADE":
-        hint = f"  {_GREEN}✓ TAKE TRADE{_RESET}"
-    if st.get("alerted"):
-        hint += f"  {_GREEN}✓ ALERT SENT{_RESET}"
-
-    print(f"\n  {_BOLD}{sym}{_RESET}  ·  {_fmt_signal(signal)}{hint}")
+    bull_r = st.get("bull_reasons", [])
+    bear_r = st.get("bear_reasons", [])
+    error  = st.get("error")
 
     if error:
-        print(f"  {_RED}  ✗ {error[:65]}{_RESET}")
+        print(f"  {sym:<3}  {_RED}ERROR  {error[:55]}{_RESET}")
         return
 
-    print(f"  ├ RSI {rsi:>5.1f}   Fund {fund_s:>8}   L/S {ls_s}")
-    print(f"  ├ Bull {bull}pt  [{_GREEN}{_score_bar(bull)}{_RESET}]"
-          + (f"  {_GREEN}{' · '.join(bull_r)}{_RESET}" if bull_r else ""))
-    print(f"  └ Bear {bear}pt  [{_RED}{_score_bar(bear)}{_RESET}]"
-          + (f"  {_RED}{' · '.join(bear_r)}{_RESET}" if bear_r else ""))
+    # Signal color
+    if "STRONG BUY"  in signal: sig_fmt = f"{_BOLD}{_GREEN}{signal:<11}{_RESET}"
+    elif "BUY"       in signal: sig_fmt = f"{_GREEN}{signal:<11}{_RESET}"
+    elif "STRONG SELL" in signal: sig_fmt = f"{_BOLD}{_RED}{signal:<11}{_RESET}"
+    elif "SELL"      in signal: sig_fmt = f"{_RED}{signal:<11}{_RESET}"
+    else:                        sig_fmt = f"{_DIM}{signal:<11}{_RESET}"
+
+    # Reasons: bull first, then bear
+    reasons = bull_r + bear_r
+    reasons_s = f"[{' '.join(reasons)}]" if reasons else ""
+
+    # Suffix tags
+    suffix = ""
+    if verdict == "TAKE_TRADE" or st.get("alerted"):
+        suffix = f"  {_GREEN}✓ TRADE{_RESET}"
+    elif signal == "BUY":
+        suffix = f"  {_DIM}+{5 - bull} to STRONG{_RESET}"
+    elif signal == "SELL":
+        suffix = f"  {_DIM}+{5 - bear} to STRONG{_RESET}"
+
+    print(f"  {sym:<3}  {sig_fmt}  RSI:{rsi:>4.1f}  "
+          f"Bull:{_GREEN}{bull}{_RESET}  Bear:{_RED}{bear}{_RESET}  "
+          f"{reasons_s}{suffix}")
 
 
 # ---------------------------------------------------------------------------
