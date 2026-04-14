@@ -91,6 +91,7 @@ BACKTEST_SYMBOL  = os.environ.get("BACKTEST_SYMBOL", SYMBOLS[0])
 PAPER_TRADE           = os.environ.get("PAPER_TRADE", "true").lower() in ("1", "true", "yes")
 PAPER_TRADES_FILE     = "paper_trades.json"
 COOLDOWN_STATE_FILE   = "cooldown_state.json"
+BALANCE_STATE_FILE    = "balance_state.json"
 RUN_STARTUP_BACKTEST  = False  # 500-candle startup backtest is too few to be useful
 
 # Signals that trigger a risk calculation
@@ -101,6 +102,25 @@ ACTIONABLE_SIGNALS = {"STRONG BUY", "STRONG SELL"}
 # ---------------------------------------------------------------------------
 
 _last_alert: dict[str, float] = {}   # symbol → last alert unix timestamp
+_balance: list = [ACCOUNT_BALANCE]   # mutable — updated as trades close
+
+
+def _load_balance_state():
+    """Load persisted balance from disk."""
+    if not os.path.isfile(BALANCE_STATE_FILE):
+        return
+    try:
+        with open(BALANCE_STATE_FILE, encoding="utf-8") as fh:
+            data = json.load(fh)
+        _balance[0] = float(data.get("balance", ACCOUNT_BALANCE))
+    except Exception:
+        pass
+
+
+def _save_balance_state():
+    """Persist current balance to disk."""
+    with open(BALANCE_STATE_FILE, "w", encoding="utf-8") as fh:
+        json.dump({"balance": round(_balance[0], 4)}, fh)
 
 
 def _load_cooldown_state():
@@ -259,10 +279,16 @@ def _check_open_paper_trades(symbol: str, ohlcv: list):
 
         if trade["outcome"]:
             updated = True
+            # Update compound balance
+            if trade["outcome"] == "WIN":
+                _balance[0] += trade["risk_usd"] * 2
+            elif trade["outcome"] == "LOSS":
+                _balance[0] -= trade["risk_usd"]
+            _save_balance_state()
             tag = f"{_GREEN}✓ WIN{_RESET}" if trade["outcome"] == "WIN" else f"{_RED}✗ LOSS{_RESET}"
             print(f"  [Paper] {tag}  {symbol} {direction}  "
                   f"@ ${trade['outcome_price']:,.0f}  "
-                  f"({trade['outcome_time']})")
+                  f"({trade['outcome_time']})  balance=${_balance[0]:,.2f}")
 
     if updated:
         _save_paper_trades(trades)
@@ -397,7 +423,7 @@ def _process_symbol(
         if sig["signal"] in ACTIONABLE_SIGNALS:
             plan = from_signal_agent(
                 sig, entry,
-                account_balance=ACCOUNT_BALANCE,
+                account_balance=_balance[0],
                 risk_pct=RISK_PCT,
             )
             status["verdict"] = plan["verdict"]
@@ -442,7 +468,7 @@ def _score_bar(score: int) -> str:
 
 def _print_cycle_header(cycle: int):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"\n{_CYAN}Cycle #{cycle}  ·  {now}  ·  {POLL_INTERVAL}s interval{_RESET}")
+    print(f"\n{_CYAN}Cycle #{cycle}  ·  {now}  ·  {POLL_INTERVAL}s interval  ·  balance=${_balance[0]:,.2f}{_RESET}")
     print(f"{_DIM}{'━' * 60}{_RESET}")
 
 def _open_trade_pnl_lines(symbol: str, current_price: float) -> list:
@@ -561,8 +587,10 @@ def main():
     print(f"  Mode      : {'📋 PAPER TRADING (no live execution)' if PAPER_TRADE else '🔴 LIVE TRADING'}")
     print(f"{'='*70}{_RESET}\n")
 
-    # Restore cooldown state so restarts don't re-trigger recent alerts
+    # Restore persisted state
+    _load_balance_state()
     _load_cooldown_state()
+    print(f"  {_DIM}Balance restored: ${_balance[0]:,.2f}{_RESET}")
     if _last_alert:
         surviving = {s: int(ALERT_COOLDOWN - (time.time() - t))
                      for s, t in _last_alert.items()
